@@ -21,6 +21,7 @@ td:nth-child(1){text-align:center}thead th{position:sticky;top:0;z-index:1}#tb t
 <div id=filters></div>
 <fieldset><legend>הנחה מינימלית %</legend><input id=md type=number value=0 style="width:60px"></fieldset><fieldset id=nwf><legend>חדש</legend><label><input type=checkbox id=onlynew> רק חדש (2210)</label><small>2192 חדשים · 18 שינוי מחיר · לעומת הדוח של 21.10.2026</small></fieldset>
 <div id=tools><button type=button id=rwreset>איפוס רוחב עמודות</button><span id=imctl hidden> <label>גודל תמונה <input id=isl type=range min=40 max=400 step=10 value=70></label><button type=button data-px=64>קטן</button><button type=button data-px=140>בינוני</button><button type=button data-px=260>גדול</button></span></div>
+<fieldset><legend>חיפוש</legend><input id=q type=search placeholder="שם, מותג, דגם..." style="width:220px"></fieldset>
 <b id=cnt aria-live=polite></b>
 <table><thead><tr id=hd></tr></thead><tbody id=tb></tbody></table>
 <script>
@@ -28,6 +29,7 @@ const R=[{"m": "🟢🔵", "mk": "🟢🔵", "c": "תינוקות", "t": "תינ
 const N=v=>String(v??'').normalize('NFC').trim();
 const LK=(CFG.cols.find(c=>c[2]==='link')||[])[0];
 const onlynew=document.getElementById('onlynew');
+const qbox=document.getElementById('q');const TXT=R.map(r=>Object.values(r).map(v=>N(v)).join(' ').toLowerCase());
 const tb=document.getElementById('tb'),hd=document.getElementById('hd'),cnt=document.getElementById('cnt'),md=document.getElementById('md');
 // header
 CFG.cols.forEach(([k,l,kind])=>{const th=document.createElement('th');th.textContent=l;if(kind!=='link'&&kind!=='img')th.dataset.k=k;if(kind==='img')th.className='im';hd.appendChild(th);});
@@ -50,35 +52,37 @@ const F=document.getElementById('filters');
 CFG.filters.forEach(([k,label])=>{
   const fs=document.createElement('fieldset');fs.dataset.group=k;
   const lg=document.createElement('legend');lg.textContent=label;fs.appendChild(lg);
-  const all=document.createElement('button');all.type='button';all.className='gbtn';all.textContent='בחר הכל';all.dataset.act='all';
-  const none=document.createElement('button');none.type='button';none.className='gbtn';none.textContent='נקה הכל';none.dataset.act='none';
-  fs.appendChild(all);fs.appendChild(none);
+  // 22.10.2026: nothing checked = whole group shown; checking values = show only those (a click SELECTS, never removes)
+  const none=document.createElement('button');none.type='button';none.className='gbtn';none.textContent='הצג הכל';none.dataset.act='none';
+  fs.appendChild(none);
   const box=document.createElement('div');box.className='opts';fs.appendChild(box);
   const counts=new Map();R.forEach(r=>{const v=N(r[k]);counts.set(v,(counts.get(v)||0)+1);});
   [...counts.keys()].sort((a,b)=>a.localeCompare(b,'he')).forEach(v=>{
     const lab=document.createElement('label');const cb=document.createElement('input');
-    cb.type='checkbox';cb.checked=true;cb.dataset.group=k;cb.value=v;
+    cb.type='checkbox';cb.checked=false;cb.dataset.group=k;cb.value=v;
     lab.appendChild(cb);const sp=document.createElement('span');sp.textContent=' '+v+' ('+counts.get(v)+')';lab.appendChild(sp);lab.dataset.v=v;box.appendChild(lab);});
-  all.onclick=()=>{box.querySelectorAll('input').forEach(c=>c.checked=true);draw();};
   none.onclick=()=>{box.querySelectorAll('input').forEach(c=>c.checked=false);draw();};
   F.appendChild(fs);});
 function draw(){
   const on={};CFG.filters.forEach(([k])=>on[k]=new Set());
   document.querySelectorAll('#filters input[type=checkbox]').forEach(c=>{if(c.checked)on[c.dataset.group].add(N(c.value));});
-  const m=parseFloat(md.value)||0;let shown=0;
+  const m=parseFloat(md.value)||0;let shown=0;const qv=N(qbox.value).toLowerCase();
+  const base=R.map((r,i)=>(+r[CFG.pk]||0)>=m&&!(onlynew&&onlynew.checked&&!r.nw)&&(!qv||TXT[i].includes(qv)));
   TR.forEach(tr=>{const r=R[+tr.dataset.i];
     // AND across groups, OR within a group, exact match on normalised value
-    const ok=CFG.filters.every(([k])=>on[k].has(tr.getAttribute('data-f-'+k)))&&(+r[CFG.pk]||0)>=m&&!(onlynew&&onlynew.checked&&!r.nw);
+    const ok=base[+tr.dataset.i]&&CFG.filters.every(([k])=>!on[k].size||on[k].has(tr.getAttribute('data-f-'+k)));
     tr.hidden=!ok;if(ok)shown++;});
   // cascading facets (22.10.2026): each group lists only values present among rows matching all OTHER groups (+min%/new);
   // a group with nothing checked is ignored for the other groups' counts
-  const base=TR.map(tr=>{const r=R[+tr.dataset.i];return (+r[CFG.pk]||0)>=m&&!(onlynew&&onlynew.checked&&!r.nw);});
   const act=CFG.filters.map(([k])=>k).filter(k=>on[k].size>0);
   CFG.filters.forEach(([k])=>{const cnts=new Map();
-    TR.forEach((tr,i)=>{if(!base[i])return;if(!act.every(g=>g===k||on[g].has(tr.getAttribute('data-f-'+g))))return;
+    TR.forEach(tr=>{const i=+tr.dataset.i;if(!base[i])return;if(!act.every(g=>g===k||on[g].has(tr.getAttribute('data-f-'+g))))return;
       const v=tr.getAttribute('data-f-'+k);cnts.set(v,(cnts.get(v)||0)+1);});
     document.querySelectorAll('#filters fieldset[data-group="'+CSS.escape(k)+'"] label').forEach(lab=>{const c=cnts.get(lab.dataset.v)||0;
-      lab.hidden=c===0;lab.lastChild.textContent=' '+lab.dataset.v+' ('+c+')';});});
+      lab.hidden=c===0&&!lab.firstChild.checked;lab.lastChild.textContent=' '+lab.dataset.v+' ('+c+')';});});
+  if(onlynew){const b2=R.map((r,i)=>(+r[CFG.pk]||0)>=m&&(!qv||TXT[i].includes(qv)));let nn=0;
+    TR.forEach(tr=>{const i=+tr.dataset.i;if(b2[i]&&R[i].nw&&CFG.filters.every(([k])=>!on[k].size||on[k].has(tr.getAttribute('data-f-'+k))))nn++;});
+    onlynew.parentNode.lastChild.textContent=' רק חדש ('+nn+')';}
   cnt.textContent='מוצגים '+shown+' מתוך '+R.length+' פריטים';cnt.dataset.shown=shown;
 }
 let sk=null,sd=1;
